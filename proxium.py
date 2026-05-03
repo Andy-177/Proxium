@@ -6,6 +6,7 @@ from tkinter import ttk
 from tkinter import filedialog
 import tkinter.scrolledtext as st
 import time
+import json
 
 class Proxium:
     def __init__(self, local_ip, local_port, remote_ip, remote_port, log_callback, packet_callback=None):
@@ -229,8 +230,10 @@ class ProxiumGUI:
         btn_frame.grid(column=0, row=0, columnspan=4, sticky="we", pady=2)
         self.clear_btn = ttk.Button(btn_frame, text="清空列表", command=self.clear_capture)
         self.clear_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.export_btn = ttk.Button(btn_frame, text="导出", command=self.export_packets)
-        self.export_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.export_txt_btn = ttk.Button(btn_frame, text="导出(TXT)", command=self.export_packets_txt)
+        self.export_txt_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.export_json_btn = ttk.Button(btn_frame, text="导出(JSON)", command=self.export_packets_json)
+        self.export_json_btn.pack(side=tk.LEFT, padx=(0, 5))
         self.capture_count_label = ttk.Label(btn_frame, text="已捕获: 0 个数据包")
         self.capture_count_label.pack(side=tk.LEFT)
 
@@ -273,6 +276,14 @@ class ProxiumGUI:
             ascii_part = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
             lines.append(f'{i:04x}: {hex_part:<{bytes_per_line*3}}  {ascii_part}')
         return '\n'.join(lines)
+
+    def format_hex_string(self, data):
+        """将二进制数据转换为十六进制字符串，格式如 '0f 00 2f 09'"""
+        return ' '.join(f'{b:02x}' for b in data)
+    
+    def bytes_to_ascii_string(self, data):
+        """将二进制数据转换为ASCII字符串，不可打印字符替换为'.'"""
+        return ''.join(chr(b) if 32 <= b < 127 else '.' for b in data)
 
     def show_packet_detail(self, event):
         selection = self.packet_tree.selection()
@@ -352,14 +363,14 @@ class ProxiumGUI:
         self.packets = []
         self.capture_count_label.config(text="已捕获: 0 个数据包")
 
-    def export_packets(self):
+    def export_packets_txt(self):
         if not self.packets:
             self.log("没有可导出的数据包")
             return
         filepath = filedialog.asksaveasfilename(
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-            title="导出抓包数据"
+            title="导出抓包数据为TXT"
         )
         if not filepath:
             return
@@ -386,6 +397,73 @@ class ProxiumGUI:
             self.log(f"抓包数据已导出到: {filepath}")
         except Exception as e:
             self.log(f"导出失败: {e}")
+
+    def export_packets_json(self):
+        """导出数据包为JSON格式，包含hex和text字段"""
+        if not self.packets:
+            self.log("没有可导出的数据包")
+            return
+        
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="导出抓包数据为JSON"
+        )
+        if not filepath:
+            return
+        
+        try:
+            # 构建JSON数据结构
+            json_data = {
+                "total": len(self.packets),
+                "packets": {}
+            }
+            
+            for i, packet in enumerate(self.packets, 1):
+                # 格式化源地址和目标地址
+                src_addr = packet.get('src_addr', ('', ''))
+                dst_addr = packet.get('dst_addr', ('', ''))
+                src = f"{src_addr[0]}:{src_addr[1]}" if src_addr[0] and src_addr[1] else ''
+                dst = f"{dst_addr[0]}:{dst_addr[1]}" if dst_addr[0] and dst_addr[1] else ''
+                
+                # 方向转换（可选：将中文方向转换为英文缩写）
+                direction = packet.get('direction', '')
+                if direction == '客户端->远端':
+                    direction_code = 'cs'  # client->server
+                elif direction == '远端->客户端':
+                    direction_code = 'sc'  # server->client
+                else:
+                    direction_code = 'unknown'
+                
+                # 获取数据
+                data = packet.get('data', b'')
+                
+                # 转换为十六进制字符串和ASCII文本
+                hex_string = self.format_hex_string(data)
+                ascii_text = self.bytes_to_ascii_string(data)
+                
+                # 构建单个数据包的JSON对象
+                json_data["packets"][f"#{i}"] = {
+                    "metadata": {
+                        "time": packet.get('timestamp', ''),
+                        "direction": direction_code,
+                        "length": packet.get('length', 0),
+                        "source_address": src,
+                        "destination_address": dst
+                    },
+                    "data": {
+                        "hex": hex_string,
+                        "text": ascii_text
+                    }
+                }
+            
+            # 写入JSON文件
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, indent=4, ensure_ascii=False)
+            
+            self.log(f"抓包数据已导出为JSON格式到: {filepath}")
+        except Exception as e:
+            self.log(f"JSON导出失败: {e}")
 
 
 def main():
