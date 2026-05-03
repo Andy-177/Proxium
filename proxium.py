@@ -170,7 +170,7 @@ class Proxium:
 class ProxiumGUI:
     def __init__(self, master):
         self.master = master
-        master.title("Proxium - 端口转发与抓包工具")
+        master.title("Proxium")
         master.geometry("800x600")
         master.minsize(600, 400)
 
